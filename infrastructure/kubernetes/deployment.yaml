@@ -1,0 +1,233 @@
+# Vulnerable Kubernetes Deployment
+# ⚠️ WARNING: Contains intentional security misconfigurations for testing
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vulnerable-app
+  labels:
+    app: vulnerable-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vulnerable-app
+  template:
+    metadata:
+      labels:
+        app: vulnerable-app
+    spec:
+      # VULNERABLE: No service account specified (uses default)
+      
+      containers:
+      - name: vulnerable-app
+        image: vulnerable-app:latest
+        
+        # VULNERABLE: Running as root
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          privileged: true  # VULNERABLE: Privileged container
+          allowPrivilegeEscalation: true  # VULNERABLE
+          readOnlyRootFilesystem: false  # VULNERABLE
+          capabilities:
+            add:
+              - ALL  # VULNERABLE: All capabilities
+        
+        ports:
+        - containerPort: 3000
+        
+        # VULNERABLE: Secrets in environment variables
+        env:
+        - name: DB_PASSWORD
+          value: "super_secret_password"
+        - name: API_KEY
+          value: "sk-1234567890abcdef"
+        - name: JWT_SECRET
+          value: "my_jwt_secret_key"
+        - name: AWS_ACCESS_KEY_ID
+          value: "AKIAIOSFODNN7EXAMPLE"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        
+        # VULNERABLE: No resource limits
+        # resources:
+        #   limits:
+        #     cpu: "500m"
+        #     memory: "128Mi"
+        
+        # VULNERABLE: No liveness/readiness probes
+        
+        # VULNERABLE: Mounting host paths
+        volumeMounts:
+        - name: host-root
+          mountPath: /host
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
+        - name: host-proc
+          mountPath: /host/proc
+      
+      volumes:
+      # VULNERABLE: Host path mounts
+      - name: host-root
+        hostPath:
+          path: /
+      - name: docker-socket
+        hostPath:
+          path: /var/run/docker.sock
+      - name: host-proc
+        hostPath:
+          path: /proc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vulnerable-app-service
+spec:
+  type: LoadBalancer  # VULNERABLE: Exposed to internet
+  selector:
+    app: vulnerable-app
+  ports:
+  - port: 80
+    targetPort: 3000
+
+---
+# VULNERABLE: Overly permissive RBAC
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vulnerable-cluster-role
+rules:
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["*"]  # VULNERABLE: Full cluster access
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vulnerable-cluster-role-binding
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: vulnerable-cluster-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# VULNERABLE: No network policy (all traffic allowed)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-all
+spec:
+  podSelector: {}
+  ingress:
+  - {}  # VULNERABLE: Allow all ingress
+  egress:
+  - {}  # VULNERABLE: Allow all egress
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+# VULNERABLE: Secrets in plain text
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vulnerable-secrets
+type: Opaque
+stringData:
+  db-password: "super_secret_password"
+  api-key: "sk-1234567890abcdef"
+  jwt-secret: "my_jwt_secret_key"
+  aws-access-key: "AKIAIOSFODNN7EXAMPLE"
+  aws-secret-key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+---
+# VULNERABLE: ConfigMap with sensitive data
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vulnerable-config
+data:
+  database-url: "mysql://admin:password123@db.example.com:3306/mydb"
+  redis-url: "redis://:secretpassword@redis.example.com:6379"
+  api-endpoint: "https://api.example.com/v1"
+  debug-mode: "true"  # VULNERABLE: Debug enabled in production
+
+---
+# VULNERABLE: Pod Security Policy (deprecated but still used)
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: vulnerable-psp
+spec:
+  privileged: true  # VULNERABLE
+  allowPrivilegeEscalation: true  # VULNERABLE
+  hostNetwork: true  # VULNERABLE
+  hostPID: true  # VULNERABLE
+  hostIPC: true  # VULNERABLE
+  runAsUser:
+    rule: RunAsAny  # VULNERABLE
+  seLinux:
+    rule: RunAsAny  # VULNERABLE
+  fsGroup:
+    rule: RunAsAny  # VULNERABLE
+  supplementalGroups:
+    rule: RunAsAny  # VULNERABLE
+  volumes:
+  - '*'  # VULNERABLE: All volume types allowed
+  hostPorts:
+  - min: 0
+    max: 65535  # VULNERABLE: All host ports allowed
+
+---
+# VULNERABLE: Ingress without TLS
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vulnerable-ingress
+  annotations:
+    # VULNERABLE: No rate limiting
+    # VULNERABLE: No WAF
+spec:
+  rules:
+  - host: vulnerable-app.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vulnerable-app-service
+            port:
+              number: 80
+  # VULNERABLE: No TLS configuration
+
+---
+# VULNERABLE: Service Account with automount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vulnerable-sa
+automountServiceAccountToken: true  # VULNERABLE: Token auto-mounted
+
+---
+# VULNERABLE: Pod with host networking
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vulnerable-pod
+spec:
+  hostNetwork: true  # VULNERABLE
+  hostPID: true  # VULNERABLE
+  hostIPC: true  # VULNERABLE
+  containers:
+  - name: vulnerable-container
+    image: vulnerable-app:latest
+    securityContext:
+      privileged: true  # VULNERABLE
